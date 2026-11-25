@@ -196,6 +196,11 @@ class _ErpPageState extends State<ErpPage> {
       },
       shouldOverrideUrlLoading: (c, action) async {
         final url = action.request.url;
+        // iOS also asks about frames inside the page (Android only asks
+        // about the page itself). Frames always load where they are.
+        if (action.isForMainFrame == false) {
+          return NavigationActionPolicy.ALLOW;
+        }
         if (url == null || isInternalUrl(url)) {
           return NavigationActionPolicy.ALLOW;
         }
@@ -241,6 +246,15 @@ class _ErpPageState extends State<ErpPage> {
       onUpdateVisitedHistory: (c, url, _) => _updateBack(),
       onReceivedError: (c, req, err) {
         _pullToRefresh?.endRefreshing();
+        // A load replaced by another one (redirect, link tapped while
+        // loading, link sent outside the app) is not a real failure.
+        // iOS reports these as errors; Android does not.
+        // (WebKit error 102 "Frame load interrupted" has no enum value.)
+        if (err.type == WebResourceErrorType.CANCELLED ||
+            err.description.contains('Frame load interrupted')) {
+          AppLog.info('ยกเลิกการโหลด (ไม่ใช่ error): ${req.url}');
+          return;
+        }
         final main = req.isForMainFrame ?? true;
         final msg =
             'โหลดไม่สำเร็จ [${err.type}] ${err.description} '
@@ -260,8 +274,13 @@ class _ErpPageState extends State<ErpPage> {
       },
       onReceivedServerTrustAuthRequest: (c, challenge) async {
         final ssl = challenge.protectionSpace.sslError;
+        // iOS calls this for EVERY https connection, not only for bad
+        // certificates (Android only calls it on an SSL error). With no
+        // error, return null so the system checks the certificate as usual;
+        // cancelling here would block every https page on iPhone/iPad.
+        if (ssl == null) return null;
         AppLog.error(
-          'SSL ไม่ผ่าน: ${ssl?.code} ${ssl?.message ?? ''} '
+          'SSL ไม่ผ่าน: ${ssl.code} ${ssl.message ?? ''} '
           '(${challenge.protectionSpace.host}) - ตรวจวันเวลาของเครื่อง',
         );
         return ServerTrustAuthResponse(

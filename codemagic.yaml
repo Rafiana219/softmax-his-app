@@ -1,0 +1,115 @@
+# Codemagic cloud builds for Softmax HIS.
+# Guide (Thai): CLOUD_BUILD.md
+#
+#   ios-simulator            iOS Simulator build -> download zip -> upload to Appetize.io by hand
+#   ios-simulator-appetize   same, and uploads to Appetize.io automatically
+#                            (needs env group "appetize" with APPETIZE_API_TOKEN)
+#   android-apk              release APK (same as the one built on Windows)
+#
+# Simulator builds are not code-signed, so no Apple Developer account is needed.
+
+definitions:
+  env: &env
+    flutter: 3.38.4
+    xcode: latest
+    cocoapods: default
+    java: 17
+    vars:
+      APP_NAME: SoftmaxHIS
+
+  scripts:
+    - &get_packages
+      name: Get packages
+      script: flutter pub get
+    - &test
+      name: Run tests
+      script: flutter test
+    - &build_simulator
+      name: Build iOS Simulator app
+      script: |
+        flutter build ios --simulator --debug
+        cd build/ios/iphonesimulator
+        zip -qr "$CM_BUILD_DIR/$APP_NAME-ios-simulator.zip" Runner.app
+        ls -lh "$CM_BUILD_DIR/$APP_NAME-ios-simulator.zip"
+
+workflows:
+  ios-simulator:
+    name: iOS Simulator (Appetize, manual upload)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment: *env
+    scripts:
+      - *get_packages
+      - *test
+      - *build_simulator
+    artifacts:
+      - "*-ios-simulator.zip"
+
+  ios-simulator-appetize:
+    name: iOS Simulator -> Appetize.io
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      <<: *env
+      groups:
+        - appetize # APPETIZE_API_TOKEN, optional APPETIZE_PUBLIC_KEY
+    scripts:
+      - *get_packages
+      - *test
+      - *build_simulator
+      - name: Upload to Appetize.io
+        script: |
+          ZIP="$CM_BUILD_DIR/$APP_NAME-ios-simulator.zip"
+          # With APPETIZE_PUBLIC_KEY the same link is updated; without it a new app is created.
+          URL="https://api.appetize.io/v1/apps${APPETIZE_PUBLIC_KEY:+/$APPETIZE_PUBLIC_KEY}"
+          curl --fail --http1.1 -sS "$URL" \
+            -H "X-API-KEY: $APPETIZE_API_TOKEN" \
+            -F "file=@$ZIP" \
+            -F "platform=ios" \
+            -F "note=$APP_NAME build $BUILD_NUMBER" \
+            -o appetize.json
+          echo "Appetize link:"
+          python3 -c "import json; print(json.load(open('appetize.json')).get('publicURL'))"
+    artifacts:
+      - "*-ios-simulator.zip"
+      - appetize.json
+
+  android-apk:
+    name: Android APK
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment: *env
+    scripts:
+      - *get_packages
+      - *test
+      - name: Build APK
+        script: flutter build apk --release
+    artifacts:
+      - build/app/outputs/flutter-apk/app-release.apk
+
+  # Step 2 (later): real install on iPhone/iPad through TestFlight.
+  # Needs an Apple Developer Program account and an App Store Connect API key
+  # added in Codemagic (Team settings -> Integrations). Remove the "#" to use it.
+  #
+  # ios-testflight:
+  #   name: iOS -> TestFlight
+  #   instance_type: mac_mini_m2
+  #   integrations:
+  #     app_store_connect: Softmax App Store Connect   # name of the key in Codemagic
+  #   environment:
+  #     <<: *env
+  #     ios_signing:
+  #       distribution_type: app_store
+  #       bundle_identifier: com.softmax.his
+  #   scripts:
+  #     - *get_packages
+  #     - name: Set up code signing
+  #       script: xcode-project use-profiles
+  #     - name: Build IPA
+  #       script: flutter build ipa --release --build-number=$BUILD_NUMBER --export-options-plist=/Users/builder/export_options.plist
+  #   artifacts:
+  #     - build/ios/ipa/*.ipa
+  #   publishing:
+  #     app_store_connect:
+  #       auth: integration
+  #       submit_to_testflight: true

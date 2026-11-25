@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'app_log.dart';
 import 'config.dart';
 import 'splash.dart';
+import 'ssl_check.dart';
 
 /// Full-screen app that shows the web ERP.
 class ErpPage extends StatefulWidget {
@@ -304,10 +305,14 @@ class _ErpPageState extends State<ErpPage> {
       onReceivedServerTrustAuthRequest: (c, challenge) async {
         final ssl = challenge.protectionSpace.sslError;
         // iOS calls this for EVERY https connection, not only for bad
-        // certificates (Android only calls it on an SSL error). With no
-        // error, return null so the system checks the certificate as usual;
-        // cancelling here would block every https page on iPhone/iPad.
-        if (ssl == null) return null;
+        // certificates, and reports a passed check as "UNSPECIFIED".
+        // When the certificate is fine, return null so the system handles
+        // it as usual; see isRealSslError.
+        final apple =
+            !kIsWeb &&
+            (defaultTargetPlatform == TargetPlatform.iOS ||
+                defaultTargetPlatform == TargetPlatform.macOS);
+        if (ssl == null || !isRealSslError(ssl, apple: apple)) return null;
         AppLog.error(
           'SSL ไม่ผ่าน: ${ssl.code} ${ssl.message ?? ''} '
           '(${challenge.protectionSpace.host}) - ตรวจวันเวลาของเครื่อง',

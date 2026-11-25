@@ -27,7 +27,9 @@ definitions:
     - &build_simulator
       name: Build iOS Simulator app
       script: |
-        flutter build ios --simulator --debug
+        # SHOW_DEBUG_LOG: bug button + on-screen log, for testing on Appetize.
+        # Remove it for a clean demo build.
+        flutter build ios --simulator --debug --dart-define=SHOW_DEBUG_LOG=true
         cd build/ios/iphonesimulator
         zip -qr "$CM_BUILD_DIR/$APP_NAME-ios-simulator.zip" Runner.app
         ls -lh "$CM_BUILD_DIR/$APP_NAME-ios-simulator.zip"

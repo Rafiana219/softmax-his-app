@@ -40,10 +40,22 @@ class _ErpPageState extends State<ErpPage> {
       _android || (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS);
 
   /// Splash stays at least 1.8 s (so the intro animation is seen) and
-  /// until the first ERP page has loaded; an error skips it.
-  bool get _hideSplash => (_firstLoadDone && _minSplashDone) || _error != null;
+  /// until the first ERP page shows; an error skips it. It never stays
+  /// longer than [_splashMax], even if the page never reports "loaded"
+  /// (seen on the iOS simulator).
+  bool get _hideSplash =>
+      (_firstLoadDone && _minSplashDone) || _error != null || _splashTimedOut;
 
+  static const _splashMax = Duration(seconds: 15);
+  bool _splashTimedOut = false;
   Timer? _splashTimer;
+  Timer? _splashMaxTimer;
+
+  void _markFirstLoad(String why) {
+    if (_firstLoadDone || !mounted) return;
+    AppLog.info('หน้าแรกพร้อมแสดง ($why)');
+    setState(() => _firstLoadDone = true);
+  }
 
   @override
   void initState() {
@@ -57,12 +69,21 @@ class _ErpPageState extends State<ErpPage> {
     _splashTimer = Timer(const Duration(milliseconds: 1800), () {
       if (mounted) setState(() => _minSplashDone = true);
     });
+    _splashMaxTimer = Timer(_splashMax, () {
+      if (!mounted || _firstLoadDone) return;
+      AppLog.warn(
+        'ผ่านไป ${_splashMax.inSeconds} วินาที หน้า ERP ยังไม่แจ้งว่าโหลดเสร็จ '
+        '(progress ${(_progress * 100).round()}%) ปิด splash ให้เห็นหน้าเว็บ',
+      );
+      setState(() => _splashTimedOut = true);
+    });
     _init();
   }
 
   @override
   void dispose() {
     _splashTimer?.cancel();
+    _splashMaxTimer?.cancel();
     _slowTimer?.cancel();
     super.dispose();
   }
@@ -231,6 +252,14 @@ class _ErpPageState extends State<ErpPage> {
       onProgressChanged: (c, p) {
         if (p == 100) _pullToRefresh?.endRefreshing();
         setState(() => _progress = p / 100);
+        if (p == 100) _markFirstLoad('progress 100%');
+      },
+      // Content started to paint: enough to hide the splash.
+      onPageCommitVisible: (c, url) => _markFirstLoad('เริ่มแสดง $url'),
+      // iOS: the web content process crashed or was killed.
+      onWebContentProcessDidTerminate: (c) {
+        AppLog.error('WebView (iOS) หยุดทำงาน กำลังโหลดใหม่');
+        c.reload();
       },
       onLoadStop: (c, url) async {
         _pullToRefresh?.endRefreshing();
@@ -240,7 +269,7 @@ class _ErpPageState extends State<ErpPage> {
             ? ''
             : ' (${DateTime.now().difference(start).inMilliseconds} ms)';
         AppLog.info('โหลดเสร็จ: $u$ms');
-        setState(() => _firstLoadDone = true);
+        _markFirstLoad('onLoadStop');
         await _updateBack();
       },
       onUpdateVisitedHistory: (c, url, _) => _updateBack(),
@@ -347,14 +376,6 @@ class _ErpPageState extends State<ErpPage> {
                       onChrome: _openInChrome,
                       onShowLog: AppConfig.showDebugLog ? _toggleLog : null,
                     ),
-                  if (AppConfig.showDebugLog && _showLog)
-                    _LogPanel(onClose: _toggleLog, onChrome: _openInChrome),
-                  if (AppConfig.showDebugLog && !_showLog)
-                    Positioned(
-                      right: 12,
-                      bottom: 12,
-                      child: _LogButton(onPressed: _toggleLog),
-                    ),
                 ],
               ),
             ),
@@ -373,6 +394,18 @@ class _ErpPageState extends State<ErpPage> {
                     child: const BrandSplash(),
                   ),
                 ),
+              ),
+            // Log button / panel sit above the splash so the log can be
+            // read even while the splash is still showing.
+            if (AppConfig.showDebugLog && _showLog)
+              SafeArea(
+                child: _LogPanel(onClose: _toggleLog, onChrome: _openInChrome),
+              ),
+            if (AppConfig.showDebugLog && !_showLog)
+              Positioned(
+                right: 12,
+                bottom: 12,
+                child: SafeArea(child: _LogButton(onPressed: _toggleLog)),
               ),
           ],
         ),

@@ -12,9 +12,11 @@ class AppConfig {
   /// Everything else (LINE, maps, phone, e-mail...) opens outside.
   static const internalDomains = ['softmax-one.com'];
 
-  /// Shows the bug button and the on-screen log. Set false for the
-  /// version that goes to customers.
-  static const showDebugLog = false;
+  /// Shows the bug button and the on-screen log. Off by default (the
+  /// version that goes to customers); turn on for a test build with
+  ///   flutter build ... --dart-define=SHOW_DEBUG_LOG=true
+  /// (codemagic.yaml does this for the iOS Simulator / Appetize build).
+  static const showDebugLog = bool.fromEnvironment('SHOW_DEBUG_LOG');
 
   // Branding shown on the splash screen.
   static const orgNameTh = 'สถาบันสุขภาพเด็กแห่งชาติมหาราชินี';
